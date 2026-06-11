@@ -21,10 +21,11 @@ public class ApiService
 
     private static readonly HttpClient httpClient = new HttpClient();
     private static readonly ConcurrentDictionary<string, CacheItem> cache = new ConcurrentDictionary<string, CacheItem>();
-    private static readonly object cacheLock = new object();
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> cacheLocks = new ConcurrentDictionary<string, SemaphoreSlim>();
+    private static readonly object cacheSizeLock = new object();
     private const int MAX_CACHE_SIZE = 15;
 
-    public static string GetQuizData(string category, string difficulty)
+    public static async Task<string> GetQuizData(string category, string difficulty)
     {
         string apiUrl = "https://opentdb.com/api.php?amount=10";
         if (!string.IsNullOrEmpty(category))
@@ -49,42 +50,43 @@ public class ApiService
             return cachedItem.ItemValue.ToString();
         }
 
-        lock (cacheKey)
+        SemaphoreSlim currentLock = cacheLocks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+
+        await currentLock.WaitAsync();
+        try
         {
-            try
+            if (cache.TryGetValue(cacheKey, out cachedItem))
             {
-                if (cache.TryGetValue(cacheKey, out cachedItem))
-                {
-                    cachedItem.LastAccessed = DateTime.UtcNow;
-                    Console.WriteLine($"[CACHE HIT] Nit {System.Threading.Thread.CurrentThread.ManagedThreadId} vraća podatke.");
-                    return cachedItem.ItemValue.ToString();
-                }
-
-                Console.WriteLine($"[API CALL] Nit {Thread.CurrentThread.ManagedThreadId} poziva API...");
-                string apiResponseString = httpClient.GetStringAsync(apiUrl).Result;
-                JObject jsonResponse = JObject.Parse(apiResponseString);
-
-                int responseCode = jsonResponse["response_code"]?.Value<int>() ?? 0;
-
-                if (responseCode != 0 || jsonResponse["results"] == null || !jsonResponse["results"].HasValues)
-                {
-                    JObject negativeResponse = new JObject
-                    {
-                        ["error"] = "Nema rezultata za ove filtere"
-                    };
-
-                    AddToCache(cacheKey, negativeResponse);
-                    return negativeResponse.ToString();
-                }
-
-                AddToCache(cacheKey, jsonResponse);
-                return jsonResponse.ToString();
+                cachedItem.LastAccessed = DateTime.UtcNow;
+                Console.WriteLine($"[CACHE HIT] Nit {System.Threading.Thread.CurrentThread.ManagedThreadId} vraća podatke.");
+                return cachedItem.ItemValue.ToString();
             }
-            catch (Exception ex)
+
+            Console.WriteLine($"[API CALL] Nit {Thread.CurrentThread.ManagedThreadId} poziva API...");
+            string apiResponseString = await httpClient.GetStringAsync(apiUrl);
+            JObject jsonResponse = JObject.Parse(apiResponseString);
+
+            int responseCode = jsonResponse["response_code"]?.Value<int>() ?? 0;
+
+            if (responseCode != 0 || jsonResponse["results"] == null || !jsonResponse["results"].HasValues)
             {
-                throw ex;
+                JObject negativeResponse = new JObject
+                {
+                    ["error"] = "Nema rezultata za ove filtere"
+                };
+
+                AddToCache(cacheKey, negativeResponse);
+                return negativeResponse.ToString();
             }
+
+            AddToCache(cacheKey, jsonResponse);
+            return jsonResponse.ToString();
         }
+        finally
+        {
+            currentLock.Release();
+        }
+
     }
 
     private static void ManageCacheSize()
@@ -105,12 +107,15 @@ public class ApiService
 
     private static void AddToCache(string key, JObject value)
     {
-        if (cache.Count >= MAX_CACHE_SIZE && !cache.ContainsKey(key))
+        lock (cacheSizeLock)
         {
-            ManageCacheSize();
-        }
+            if (cache.Count >= MAX_CACHE_SIZE && !cache.ContainsKey(key))
+            {
+                ManageCacheSize();
+            }
 
-        var newItem = new CacheItem(value);
-        cache.AddOrUpdate(key, newItem, (k, old) => newItem);
+            var newItem = new CacheItem(value);
+            cache.AddOrUpdate(key, newItem, (k, old) => newItem);
+        }
     }
 }
