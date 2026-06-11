@@ -66,16 +66,29 @@ class Program
         string category = request.QueryString["category"];
         string difficulty = request.QueryString["difficulty"]?.Trim().ToLower();
 
-        try
-        {
-            string result = ApiService.GetQuizData(category, difficulty);
-            SendResponse(context, result, HttpStatusCode.OK);
+        Task<string> quizDataTask = ApiService.GetQuizData(category, difficulty);
 
-        }
-        catch (Exception ex)
+        quizDataTask.ContinueWith(antecedentTask =>
         {
-            SendResponse(context, $"{{\"error\": \"{ex.Message}\"}}", HttpStatusCode.InternalServerError);
-        }
+            try
+            {
+                if (antecedentTask.IsFaulted)
+                {
+                    Exception ex = antecedentTask.Exception.InnerException ?? antecedentTask.Exception;
+                    SendResponse(context, $"{{\"error\": \"{ex.Message}\"}}", HttpStatusCode.InternalServerError);
+                }
+                else if (antecedentTask.IsCompletedSuccessfully)
+                {
+                    string result = antecedentTask.Result;
+                    SendResponse(context, result, HttpStatusCode.OK);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CONTINUE WITH] Greška unutar kontinuacije: {ex.Message}");
+                context.Response.Close();
+            }
+        });
     }
 
     private static void SendResponse(HttpListenerContext context, string content, HttpStatusCode status)
