@@ -33,7 +33,7 @@ class Program
                     //ThreadPool.QueueUserWorkItem(ProcessRequest, context);
                     _ = ProcessRequest(context);
                 }
-                catch (HttpListenerException ex) when (!serverRunning)
+                catch (Exception ex) when (!serverRunning)
                 {
                     Console.WriteLine("[SERVER] Slušalac zaustavljen.");
                     break;
