@@ -5,7 +5,7 @@ using System.Threading;
 
 class Program
 {
-    static void Main(string[] args)
+    static async Task Main(string[] args)
     {
         HttpListener listener = new HttpListener();
         listener.Prefixes.Add("http://localhost:5000/");
@@ -29,8 +29,9 @@ class Program
             {
                 try
                 {
-                    HttpListenerContext context = listener.GetContext();
-                    ThreadPool.QueueUserWorkItem(ProcessRequest, context);
+                    HttpListenerContext context = await listener.GetContextAsync();
+                    //ThreadPool.QueueUserWorkItem(ProcessRequest, context);
+                    _ = ProcessRequest(context);
                 }
                 catch (HttpListenerException ex) when (!serverRunning)
                 {
@@ -50,17 +51,15 @@ class Program
         }
     }
 
-    private static void ProcessRequest(object state)
+    private static Task ProcessRequest(HttpListenerContext context)
     {
-
-        HttpListenerContext context = (HttpListenerContext)state;
         var request = context.Request;
 
         if (request.Url.AbsolutePath.EndsWith("favicon.ico"))
         {
             context.Response.StatusCode = (int)HttpStatusCode.NotFound;
             context.Response.Close();
-            return;
+            return Task.CompletedTask;
         }
 
         string category = request.QueryString["category"];
@@ -68,7 +67,7 @@ class Program
 
         Task<string> quizDataTask = ApiService.GetQuizData(category, difficulty);
 
-        quizDataTask.ContinueWith(antecedentTask =>
+        return quizDataTask.ContinueWith(antecedentTask =>
         {
             try
             {

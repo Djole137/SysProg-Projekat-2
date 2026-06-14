@@ -23,7 +23,7 @@ public class ApiService
     private static readonly ConcurrentDictionary<string, CacheItem> cache = new ConcurrentDictionary<string, CacheItem>();
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> cacheLocks = new ConcurrentDictionary<string, SemaphoreSlim>();
     private static readonly object cacheSizeLock = new object();
-    private const int MAX_CACHE_SIZE = 15;
+    private const int MAX_CACHE_SIZE = 3;
 
     public static async Task<string> GetQuizData(string category, string difficulty)
     {
@@ -101,9 +101,16 @@ public class ApiService
             if (cache.TryRemove(oldestKey, out _))
             {
                 Console.WriteLine($"[CACHE] Izbačen najmanje korišćen ključ: {oldestKey}");
+
+                if (cacheLocks.TryRemove(oldestKey, out SemaphoreSlim semaphoreToRemove))
+                {
+                    semaphoreToRemove.Dispose();
+                    Console.WriteLine($"[CACHE] Izbačen semafor za najmanje korišćen ključ: {oldestKey}");
+                }
             }
         }
     }
+
 
     private static void AddToCache(string key, JObject value)
     {
