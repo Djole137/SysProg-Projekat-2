@@ -31,7 +31,7 @@ class Program
                 {
                     HttpListenerContext context = await listener.GetContextAsync();
                     //ThreadPool.QueueUserWorkItem(ProcessRequest, context);
-                    _ = ProcessRequest(context);
+                    _ = Task.Run(() => ProcessRequest(context));
                 }
                 catch (Exception ex) when (!serverRunning)
                 {
